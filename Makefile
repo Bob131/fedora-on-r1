@@ -12,6 +12,9 @@ help:
 
 include Makefile.config
 
+fetch-patches:
+	if [ ! -e patch* ]; then curl -O "https://www.kernel.org/pub/linux/kernel/v4.x/`grep -o 'patch-.*' sources`"; fi
+
 prep:
 	fedpkg -v prep
 

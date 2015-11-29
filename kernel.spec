@@ -85,15 +85,15 @@ Summary: The Linux kernel
 # standard kernel
 %define with_up        %{?_without_up:        0} %{?!_without_up:        1}
 # kernel PAE (only valid for i686 (PAE) and ARM (lpae))
-%define with_pae       %{?_without_pae:       0} %{?!_without_pae:       1}
+%define with_pae       0
 # kernel-debug
 %define with_debug     %{?_without_debug:     0} %{?!_without_debug:     1}
 # kernel-headers
 %define with_headers   %{?_without_headers:   0} %{?!_without_headers:   1}
 # perf
-%define with_perf      %{?_without_perf:      0} %{?!_without_perf:      1}
+%define with_perf      0
 # tools
-%define with_tools     %{?_without_tools:     0} %{?!_without_tools:     1}
+%define with_tools     0
 # kernel-debuginfo
 %define with_debuginfo %{?_without_debuginfo: 0} %{?!_without_debuginfo: 1}
 # kernel-bootwrapper (for creating zImages from kernel + initrd)
@@ -655,6 +655,9 @@ Patch568: Input-aiptek-fix-crash-on-detecting-device-without-e.patch
 
 #rhbz 1287819
 Patch570: HID-multitouch-enable-palm-rejection-if-device-imple.patch
+
+#Banana Pi R1 patchset
+Patch580: bananapi-r1-4.x.patch
 
 # END OF PATCH DEFINITIONS
 
