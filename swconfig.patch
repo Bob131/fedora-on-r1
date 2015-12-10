@@ -1,0 +1,441 @@
+diff --git a/Makefile b/Makefile
+index 0d56f43..8f0d2b0 100644
+--- a/Makefile
++++ b/Makefile
+@@ -1,12 +1,13 @@
+-ifndef CFLAGS
+-CFLAGS = -O2 -g -I ../src
+-endif
+-LIBS=-lnl -lnl-genl
++C_FLAGS=$(CFLAGS) -I /usr/include/libnl3 -I .
++LIBS=-lnl-3 -lnl-genl-3
+ 
+ all: swconfig
+ 
+ %.o: %.c
+-	$(CC) $(CFLAGS) -c -o $@ $^
++	$(CC) $(C_FLAGS) -c -o $@ $^
+ 
+-swconfig: cli.o swlib.o uci.o
++swconfig: cli.o swlib.o
+ 	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
++
++install:
++	install -D swconfig $(DESTDIR)/usr/sbin/swconfig
+diff --git a/cli.c b/cli.c
+index d472086..401917c 100644
+--- a/cli.c
++++ b/cli.c
+@@ -23,7 +23,7 @@
+ #include <getopt.h>
+ #include <sys/types.h>
+ #include <sys/socket.h>
+-#include <uci.h>
++#include <stdbool.h>
+ 
+ #include <linux/types.h>
+ #include <linux/netlink.h>
+@@ -173,32 +173,6 @@ print_usage(void)
+ 	exit(1);
+ }
+ 
+-static void
+-swconfig_load_uci(struct switch_dev *dev, const char *name)
+-{
+-	struct uci_context *ctx;
+-	struct uci_package *p = NULL;
+-	int ret = -1;
+-
+-	ctx = uci_alloc_context();
+-	if (!ctx)
+-		return;
+-
+-	uci_load(ctx, name, &p);
+-	if (!p) {
+-		uci_perror(ctx, "Failed to load config file: ");
+-		goto out;
+-	}
+-
+-	ret = swlib_apply_from_uci(dev, p);
+-	if (ret < 0)
+-		fprintf(stderr, "Failed to apply configuration for switch '%s'\n", dev->dev_name);
+-
+-out:
+-	uci_free_context(ctx);
+-	exit(ret);
+-}
+-
+ int main(int argc, char **argv)
+ {
+ 	int retval = 0;
+@@ -323,9 +297,6 @@ int main(int argc, char **argv)
+ 		print_attr_val(a, &val);
+ 		putchar('\n');
+ 		break;
+-	case CMD_LOAD:
+-		swconfig_load_uci(dev, ckey);
+-		break;
+ 	case CMD_HELP:
+ 		list_attributes(dev);
+ 		break;
+diff --git a/swconfig/linux/switch.h b/linux/switch.h
+new file mode 100644
+index 0000000..a59b239
+--- a/linux/switch.h
++++ b/linux/switch.h
+@@ -0,0 +1,103 @@
++/*
++ * switch.h: Switch configuration API
++ *
++ * Copyright (C) 2008 Felix Fietkau <nbd@openwrt.org>
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License
++ * as published by the Free Software Foundation; either version 2
++ * of the License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ */
++
++#ifndef _UAPI_LINUX_SWITCH_H
++#define _UAPI_LINUX_SWITCH_H
++
++#include <linux/types.h>
++#include <linux/netdevice.h>
++#include <linux/netlink.h>
++#include <linux/genetlink.h>
++#ifndef __KERNEL__
++#include <netlink/netlink.h>
++#include <netlink/genl/genl.h>
++#include <netlink/genl/ctrl.h>
++#endif
++
++/* main attributes */
++enum {
++	SWITCH_ATTR_UNSPEC,
++	/* global */
++	SWITCH_ATTR_TYPE,
++	/* device */
++	SWITCH_ATTR_ID,
++	SWITCH_ATTR_DEV_NAME,
++	SWITCH_ATTR_ALIAS,
++	SWITCH_ATTR_NAME,
++	SWITCH_ATTR_VLANS,
++	SWITCH_ATTR_PORTS,
++	SWITCH_ATTR_PORTMAP,
++	SWITCH_ATTR_CPU_PORT,
++	/* attributes */
++	SWITCH_ATTR_OP_ID,
++	SWITCH_ATTR_OP_TYPE,
++	SWITCH_ATTR_OP_NAME,
++	SWITCH_ATTR_OP_PORT,
++	SWITCH_ATTR_OP_VLAN,
++	SWITCH_ATTR_OP_VALUE_INT,
++	SWITCH_ATTR_OP_VALUE_STR,
++	SWITCH_ATTR_OP_VALUE_PORTS,
++	SWITCH_ATTR_OP_DESCRIPTION,
++	/* port lists */
++	SWITCH_ATTR_PORT,
++	SWITCH_ATTR_MAX
++};
++
++enum {
++	/* port map */
++	SWITCH_PORTMAP_PORTS,
++	SWITCH_PORTMAP_SEGMENT,
++	SWITCH_PORTMAP_VIRT,
++	SWITCH_PORTMAP_MAX
++};
++
++/* commands */
++enum {
++	SWITCH_CMD_UNSPEC,
++	SWITCH_CMD_GET_SWITCH,
++	SWITCH_CMD_NEW_ATTR,
++	SWITCH_CMD_LIST_GLOBAL,
++	SWITCH_CMD_GET_GLOBAL,
++	SWITCH_CMD_SET_GLOBAL,
++	SWITCH_CMD_LIST_PORT,
++	SWITCH_CMD_GET_PORT,
++	SWITCH_CMD_SET_PORT,
++	SWITCH_CMD_LIST_VLAN,
++	SWITCH_CMD_GET_VLAN,
++	SWITCH_CMD_SET_VLAN
++};
++
++/* data types */
++enum switch_val_type {
++	SWITCH_TYPE_UNSPEC,
++	SWITCH_TYPE_INT,
++	SWITCH_TYPE_STRING,
++	SWITCH_TYPE_PORTS,
++	SWITCH_TYPE_NOVAL,
++};
++
++/* port nested attributes */
++enum {
++	SWITCH_PORT_UNSPEC,
++	SWITCH_PORT_ID,
++	SWITCH_PORT_FLAG_TAGGED,
++	SWITCH_PORT_ATTR_MAX
++};
++
++#define SWITCH_ATTR_DEFAULTS_OFFSET	0x1000
++
++
++#endif /* _UAPI_LINUX_SWITCH_H */
+diff --git a/uci.c b/swconfig.orig/uci.c
+deleted file mode 100644
+index bbeeb03..0000000
+--- a/uci.c
++++ b/uci.c
+@@ -1,246 +0,0 @@
+-/*
+- * uci.c: UCI binding for the switch configuration utility
+- *
+- * Copyright (C) 2009 Felix Fietkau <nbd@openwrt.org>
+- *
+- * This program is free software; you can redistribute it and/or
+- * modify it under the terms of the GNU General Public License
+- * version 2 as published by the Free Software Foundatio.
+- *
+- * This program is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU General Public License for more details.
+- */
+-
+-#include <stdio.h>
+-#include <string.h>
+-#include <stdlib.h>
+-#include <inttypes.h>
+-#include <errno.h>
+-#include <stdint.h>
+-#include <getopt.h>
+-#include <sys/types.h>
+-#include <sys/socket.h>
+-#include <uci.h>
+-
+-#include <linux/types.h>
+-#include <linux/netlink.h>
+-#include <linux/genetlink.h>
+-#include <netlink/netlink.h>
+-#include <netlink/genl/genl.h>
+-#include <netlink/genl/ctrl.h>
+-#include <linux/switch.h>
+-#include "swlib.h"
+-
+-#ifndef ARRAY_SIZE
+-#define ARRAY_SIZE(x) (sizeof(x) / sizeof(x[0]))
+-#endif
+-
+-struct swlib_setting {
+-	struct switch_attr *attr;
+-	const char *name;
+-	int port_vlan;
+-	const char *val;
+-	struct swlib_setting *next;
+-};
+-
+-struct swlib_setting early_settings[] = {
+-	{ .name = "reset", .val = "1" },
+-	{ .name = "enable_vlan", .val = "1" },
+-};
+-
+-static struct swlib_setting *settings;
+-static struct swlib_setting **head;
+-
+-static bool swlib_match_name(struct switch_dev *dev, const char *name)
+-{
+-	return (strcmp(name, dev->dev_name) == 0 ||
+-		strcmp(name, dev->alias) == 0);
+-}
+-
+-static int
+-swlib_map_settings(struct switch_dev *dev, int type, int port_vlan, struct uci_section *s)
+-{
+-	struct swlib_setting *setting;
+-	struct switch_attr *attr;
+-	struct uci_element *e;
+-	struct uci_option *o;
+-
+-	uci_foreach_element(&s->options, e) {
+-		o = uci_to_option(e);
+-
+-		if (o->type != UCI_TYPE_STRING)
+-			continue;
+-
+-		if (!strcmp(e->name, "device"))
+-			continue;
+-
+-		/* map early settings */
+-		if (type == SWLIB_ATTR_GROUP_GLOBAL) {
+-			int i;
+-
+-			for (i = 0; i < ARRAY_SIZE(early_settings); i++) {
+-				if (strcmp(e->name, early_settings[i].name) != 0)
+-					continue;
+-
+-				early_settings[i].val = o->v.string;
+-				goto skip;
+-			}
+-		}
+-
+-		attr = swlib_lookup_attr(dev, type, e->name);
+-		if (!attr)
+-			continue;
+-
+-		setting = malloc(sizeof(struct swlib_setting));
+-		memset(setting, 0, sizeof(struct swlib_setting));
+-		setting->attr = attr;
+-		setting->port_vlan = port_vlan;
+-		setting->val = o->v.string;
+-		*head = setting;
+-		head = &setting->next;
+-skip:
+-		continue;
+-	}
+-}
+-
+-int swlib_apply_from_uci(struct switch_dev *dev, struct uci_package *p)
+-{
+-	struct switch_attr *attr;
+-	struct uci_element *e;
+-	struct uci_section *s;
+-	struct uci_option *o;
+-	struct uci_ptr ptr;
+-	struct switch_val val;
+-	int i;
+-
+-	settings = NULL;
+-	head = &settings;
+-
+-	uci_foreach_element(&p->sections, e) {
+-		struct uci_element *n;
+-
+-		s = uci_to_section(e);
+-
+-		if (strcmp(s->type, "switch") != 0)
+-			continue;
+-
+-		uci_foreach_element(&s->options, n) {
+-			struct uci_option *o = uci_to_option(n);
+-
+-			if (strcmp(n->name, "name") != 0)
+-				continue;
+-
+-			if (o->type != UCI_TYPE_STRING)
+-				continue;
+-
+-			if (swlib_match_name(dev, o->v.string))
+-				goto found;
+-
+-			break;
+-		}
+-
+-		if (!swlib_match_name(dev, e->name))
+-			continue;
+-
+-		goto found;
+-	}
+-
+-	/* not found */
+-	return -1;
+-
+-found:
+-	/* look up available early options, which need to be taken care
+-	 * of in the correct order */
+-	for (i = 0; i < ARRAY_SIZE(early_settings); i++) {
+-		early_settings[i].attr = swlib_lookup_attr(dev,
+-			SWLIB_ATTR_GROUP_GLOBAL, early_settings[i].name);
+-	}
+-	swlib_map_settings(dev, SWLIB_ATTR_GROUP_GLOBAL, 0, s);
+-
+-	/* look for port or vlan sections */
+-	uci_foreach_element(&p->sections, e) {
+-		struct uci_element *os;
+-		s = uci_to_section(e);
+-
+-		if (!strcmp(s->type, "switch_port")) {
+-			char *devn, *port, *port_err = NULL;
+-			int port_n;
+-
+-			uci_foreach_element(&s->options, os) {
+-				o = uci_to_option(os);
+-				if (o->type != UCI_TYPE_STRING)
+-					continue;
+-
+-				if (!strcmp(os->name, "device")) {
+-					devn = o->v.string;
+-					if (!swlib_match_name(dev, devn))
+-						devn = NULL;
+-				} else if (!strcmp(os->name, "port")) {
+-					port = o->v.string;
+-				}
+-			}
+-			if (!devn || !port || !port[0])
+-				continue;
+-
+-			port_n = strtoul(port, &port_err, 0);
+-			if (port_err && port_err[0])
+-				continue;
+-
+-			swlib_map_settings(dev, SWLIB_ATTR_GROUP_PORT, port_n, s);
+-		} else if (!strcmp(s->type, "switch_vlan")) {
+-			char *devn, *vlan, *vlan_err = NULL;
+-			int vlan_n;
+-
+-			uci_foreach_element(&s->options, os) {
+-				o = uci_to_option(os);
+-				if (o->type != UCI_TYPE_STRING)
+-					continue;
+-
+-				if (!strcmp(os->name, "device")) {
+-					devn = o->v.string;
+-					if (!swlib_match_name(dev, devn))
+-						devn = NULL;
+-				} else if (!strcmp(os->name, "vlan")) {
+-					vlan = o->v.string;
+-				}
+-			}
+-			if (!devn || !vlan || !vlan[0])
+-				continue;
+-
+-			vlan_n = strtoul(vlan, &vlan_err, 0);
+-			if (vlan_err && vlan_err[0])
+-				continue;
+-
+-			swlib_map_settings(dev, SWLIB_ATTR_GROUP_VLAN, vlan_n, s);
+-		}
+-	}
+-
+-	for (i = 0; i < ARRAY_SIZE(early_settings); i++) {
+-		struct swlib_setting *st = &early_settings[i];
+-		if (!st->attr || !st->val)
+-			continue;
+-		swlib_set_attr_string(dev, st->attr, st->port_vlan, st->val);
+-
+-	}
+-
+-	while (settings) {
+-		struct swlib_setting *st = settings;
+-
+-		swlib_set_attr_string(dev, st->attr, st->port_vlan, st->val);
+-		st = st->next;
+-		free(settings);
+-		settings = st;
+-	}
+-
+-	/* Apply the config */
+-	attr = swlib_lookup_attr(dev, SWLIB_ATTR_GROUP_GLOBAL, "apply");
+-	if (!attr)
+-		return 0;
+-
+-	memset(&val, 0, sizeof(val));
+-	swlib_set_attr(dev, attr, &val);
+-
+-	return 0;
+-}

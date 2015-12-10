@@ -15,6 +15,25 @@ include Makefile.config
 fetch-patches:
 	if [ ! -e patch* ]; then curl -O "https://www.kernel.org/pub/linux/kernel/v4.x/`grep -o 'patch-.*' sources`"; fi
 
+fetch-swconfig:
+	if [ -e swconfig-* ]; then exit 0; fi
+	$(eval VERSION = $(shell grep -Po '(?<=Version:).*' swconfig.spec | grep -Po '[0-9\.]+'))
+	rm -rf swconfig
+	git init swconfig
+	@cd swconfig; \
+	git remote add origin git://git.openwrt.org/$(VERSION)/openwrt.git; \
+	git config core.sparseCheckout true; \
+	echo "package/network/config/swconfig/src" >> .git/info/sparse-checkout; \
+	git pull origin master; \
+	mv package/network/config/swconfig/src/* .; \
+	rm -rf package; \
+	rm -rf .git
+	tar -cf swconfig-$(VERSION).tar swconfig
+	gzip -9 swconfig-$(VERSION).tar
+	rm -rf swconfig
+
+fetch: fetch-patches fetch-swconfig
+
 prep:
 	fedpkg -v prep
 
